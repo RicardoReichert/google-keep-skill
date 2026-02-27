@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# Sensitive / Session Data
+config/cookies.json
+config/chrome-profile/
+keep_profile/
+
+# Debug artifacts
+debug_*.png
+editor_dump.html
+
+# Temp test files
+test_instructions.py
+
+# OS
+.DS_Store
+Thumbs.db
+
+# UV
+.python-version
