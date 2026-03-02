@@ -84,7 +84,7 @@ The skill follows a **CLI → Browser Automation → DOM Interaction** pattern, 
 All commands are executed via the CLI. The backend works unconditionally across Google Keep's dynamic interface.
 
 ```bash
-cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py <command>
+cd /path/to/google-keep-skill && uv run python scripts/keep.py <command>
 ```
 
 ### ��️ Global Flags
@@ -104,7 +104,7 @@ cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.p
   * Creates a simple **text** note. Uses CDP interactions and async injection. Accepts the `\n` literal in the `content` parameter to elegantly simulate paragraph line breaks.
 * `create-list --title "T" --items "A, B, C"`
   * Creates a special **list** type note. The iterative parameter splits commas, typing item by item and simulating organic ENTERs to invoke Google's JavaScript/React chain and build the "checkboxes".
-* `update --title "T" [--new-title "NT"] [--content "C"]`
+* `update --title "T" [--content "C"]`
   * **The Most Complex Command.** Restructures both Normal and List Notes dynamically:
     * **Normal Text:** Copies original state, actively clears canvas (`Ctrl+A` and `Delete` via organic keyboard events), and re-injects line by line.
     * **Lists:** Simulates `MouseEvent` flows on the exclusion nodes to zero out the list, and then sequentially injects the new `--content` simulating `create-list` logic.
@@ -139,8 +139,8 @@ uv run python scripts/keep.py read --title "Meeting Notes"
 # 6. Updating an Entire List (Resetting previous items)
 uv run python scripts/keep.py update --title "Groceries" --content "Milk\nAlmond Milk\nSugar"
 
-# 7. Updating the Title of a Text Note
-uv run python scripts/keep.py update --title "Meeting Notes" --new-title "Sprint Planning" --content "Updated content exclusively"
+# 7. Updating the Content of a Text Note
+uv run python scripts/keep.py update --title "Meeting Notes" --content "Updated content exclusively"
 
 # 8. Clearing the Board (Delete and Archive)
 uv run python scripts/keep.py delete --title "Old Note"

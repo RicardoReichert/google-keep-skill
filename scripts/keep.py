@@ -618,34 +618,7 @@ async def cmd_update(args) -> None:
 
         await asyncio.sleep(1)
 
-        # 3. Edit title
-        if args.new_title:
-            new_title_js = json.dumps(args.new_title)
-            await tab.evaluate(f"""
-                (() => {{
-                    const oldTitle = {target_js};
-                    const divs = document.querySelectorAll('div[role="textbox"]');
-                    let targetEl = null;
-                    for (const d of divs) {{
-                        if (d.offsetParent !== null && (
-                            (d.innerText && (d.innerText.trim() === 'Título' || d.innerText.trim() === 'Title') && d.children.length === 0) ||
-                            (d.getAttribute('aria-label') === 'Título' || d.getAttribute('aria-label') === 'Title') ||
-                            (d.innerText && d.innerText.trim() === oldTitle.trim())
-                        )) {{
-                            targetEl = d;
-                            break;
-                        }}
-                    }}
-                    if (targetEl) {{
-                        targetEl.click();
-                        targetEl.focus();
-                        document.execCommand('selectAll', false, null);
-                        document.execCommand('delete', false, null);
-                        document.execCommand('insertText', false, {new_title_js});
-                    }}
-                }})()
-            """)
-            await asyncio.sleep(0.5)
+        # (Skipping explicit title rewrite as per functionality drop)
 
         is_list = (note_data['type'] == 'list') if note_data else False
 
@@ -917,7 +890,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("update", help="Updates an existing note")
     sp.add_argument("--title", required=True, help="Current exact title")
-    sp.add_argument("--new-title", help="New title for the note")
     sp.add_argument("--content", help="New content replacing old text")
     sp.add_argument("--items", help="New list items replacing old ones")
 
