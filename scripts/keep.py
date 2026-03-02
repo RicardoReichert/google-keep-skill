@@ -789,18 +789,6 @@ async def _press_enter(tab) -> None:
 
 
 async def cmd_delete(args) -> None:
-    """Abre a nota e move para lixeira.
-
-    Fluxo:
-      1. Localizar o card da nota pelo título e clicar (CDP) para abrir.
-      2. Encontrar div[role='button'][data-tooltip-text='Mais'][aria-label='Mais'] e clicar.
-      3. Encontrar div com texto 'Excluir nota' e clicar.
-    """
-    browser, tab = await _open_keep(headless=not getattr(args, 'visible', False))
-    if not browser:
-        return
-
-async def cmd_delete(args) -> None:
     """Abre a nota e move para lixeira (seguindo o fluxo preciso de clique no título)."""
     browser, tab = await _open_keep(headless=not getattr(args, 'visible', False))
     if not browser:
