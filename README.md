@@ -87,7 +87,7 @@ All commands are executed via the CLI. The backend works unconditionally across 
 cd /path/to/google-keep-skill && uv run python scripts/keep.py <command>
 ```
 
-### ��️ Global Flags
+### ⚙️ Global Flags
 * `--visible`: Appended before the command (e.g., `keep.py --visible update ...`). Forces `nodriver` to run the browser in visible mode (headful) instead of secretly executing in the background. Useful for debugging or visually confirming operations.
 
 ### 1. System & Session
