@@ -508,235 +508,237 @@ async def cmd_update(args) -> None:
 
     try:
         await _wait_notes(tab)
+
+        # 1. Extrair metadados da nota antes de prosseguir para a interface
+        target = args.title.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+        note_data_json = await tab.evaluate(f"""
+            (() => {{
+                const cards = document.querySelectorAll('div.IZ65Hb-n0tgWb');
+                for (const el of cards) {{
+                    const titleEl = el.querySelector('div[role="textbox"][dir="ltr"]') || el.querySelector('div[role="textbox"]');
+                    if (titleEl && titleEl.innerText && titleEl.innerText.trim() === `{target}`) {{
+                        const title = titleEl.innerText.trim();
+                        const hasCheckboxes = el.querySelector('div[role="checkbox"]') !== null;
+                        let content;
+                        
+                        if (hasCheckboxes) {{
+                            const items = [];
+                            el.querySelectorAll('div[role="checkbox"]').forEach(cb => {{
+                                let row = cb.parentElement;
+                                while (row && row !== el) {{
+                                    const paras = row.querySelectorAll('p[role="presentation"]');
+                                    if (paras.length === 1 && row.contains(cb)) {{
+                                        const span = paras[0].querySelector('span');
+                                        const text = (span ? span.innerText : paras[0].innerText).trim();
+                                        if (text) items.push(text);
+                                        break;
+                                    }}
+                                    row = row.parentElement;
+                                }}
+                            }});
+                            content = items;
+                        }} else {{
+                            const paras = el.querySelectorAll('p[role="presentation"]');
+                            const lines = [];
+                            paras.forEach(p => {{
+                                const span = p.querySelector('span');
+                                const line = (span ? span.innerText : p.innerText).trim();
+                                if (line) lines.push(line);
+                            }});
+                            content = lines;
+                        }}
+                        
+                        return JSON.stringify({{
+                            title: title,
+                            content: content,
+                            type: hasCheckboxes ? 'list' : 'text'
+                        }});
+                    }}
+                }}
+                return null;
+            }})()
+        """)
+        
+        note_data = None
+        if note_data_json:
+            try:
+                import json
+                note_data = json.loads(note_data_json)
+            except:
+                pass
+
+        if not note_data:
+            _output(False, f"Nota '{args.title}' não encontrada para leitura prévia")
+            return
+            
+        # 2. Variavel na memoria com as alteracoes necessarias 
+        dados_editados_em_memoria = ""
+        if note_data['type'] == 'text':
+            dados_editados_em_memoria = args.content if args.content else "\\n".join(note_data.get('content', []))
+
+        # 3. Localizar a nota correspondente no browser e clicar para abrir o modo de edicao
         clicked = await _find_and_click_note_by_title_textbox(tab, args.title)
         if not clicked:
             clicked = await _find_and_click_note(tab, args.title)
         if not clicked:
-            _output(False, f"Nota '{args.title}' não encontrada")
+            _output(False, f"Nota '{args.title}' não encontrada para abrir")
             return
 
         await asyncio.sleep(1)
 
-        # Card da nota aberta = ancestral do botão Fechar (evita atingir área "Criar uma nota")
-        open_card_js = """
-            var btn = Array.from(document.querySelectorAll('div[role="button"]')).find(b => b.innerText && b.innerText.trim() === 'Fechar');
-            return btn ? btn.closest('div.IZ65Hb-n0tgWb') : null;
-        """
-
+        # Logica Centralizada do Editor Ativo (Aberto)
+        # 2. Editar Título
         if args.new_title:
-            escaped = args.new_title.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
-            await tab.evaluate(f"""
-                (() => {{
-                    const card = (() => {{ {open_card_js} }})();
-                    if (!card) return;
-                    const titleEl = card.querySelector('div[role="textbox"][dir="ltr"]') || card.querySelector('div[role="textbox"]');
-                    if (!titleEl || titleEl.offsetParent === null) return;
-                    titleEl.focus();
-                    const sel = document.getSelection();
-                    const range = document.createRange();
-                    range.selectNodeContents(titleEl);
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                    document.execCommand('insertText', false, `{escaped}`);
-                }})()
+            escaped_title = args.new_title.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+            # Clicar na div que contem o titulo da nota aberta para focar
+            title_coords = await _eval_coords(tab, """
+                const divs = document.querySelectorAll('div');
+                for (const d of divs) {
+                    // Ignora divs invisiveis e procura pelo placeholder generico de titulo ou o campo ja preenchido via aria-label
+                    if (d.offsetParent !== null && (
+                        (d.innerText && (d.innerText.trim() === 'Título' || d.innerText.trim() === 'Title') && d.children.length === 0) ||
+                        (d.getAttribute('aria-label') === 'Título' || d.getAttribute('aria-label') === 'Title')
+                    )) {
+                        const r = d.getBoundingClientRect();
+                        return {x: r.x + r.width / 2, y: r.y + r.height / 2};
+                    }
+                }
+                return null;
             """)
+            if title_coords:
+                await _cdp_click(tab, *title_coords)
+                await asyncio.sleep(0.3)
+                await tab.evaluate(f"""
+                    (() => {{
+                        document.execCommand('selectAll', false, null);
+                        document.execCommand('delete', false, null);
+                        document.execCommand('insertText', false, `{escaped_title}`);
+                    }})()
+                """)
             await asyncio.sleep(0.3)
 
-        # Detectar se a nota aberta é lista (dentro do card aberto)
-        is_list = await tab.evaluate(f"""
-            (() => {{
-                const card = (() => {{ {open_card_js} }})();
-                return card ? card.querySelector('div[aria-label="item da lista"]') !== null : false;
-            }})();
-        """)
-        is_list = bool(is_list)
+        # 3. Detectar Tipo e Atualizar Conteudo usando os metadados confiaveis extraidos
+        is_list = (note_data['type'] == 'list') if note_data else False
 
         if is_list and (args.items or args.content):
             items_src = args.items or args.content or ""
-            items = [s.strip() for s in items_src.replace(",", "\n").split("\n") if s.strip()]
+            items_src = items_src.replace("\\n", "\n")
+            if args.items and not args.content:
+                # Comportamento retroativo para --items "A, B, C"
+                items_src = items_src.replace(",", "\n")
+            items = [s.strip() for s in items_src.split("\n") if s.strip()]
+            
+            # Logica de Atualizacao de Lista (Protocolo do Usuario):
+            # 1. Limpar todos os itens existentes clicando no botao "Excluir"
             if items:
-                item_count = 0
-                for idx, item in enumerate(items):
-                    escaped_item = item.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${}")
-                    if idx == 0:
-                        coords = await _eval_coords(tab, f"""
-                            const card = (() => {{ {open_card_js} }})();
-                            if (!card) return null;
-                            const el = card.querySelector('div[aria-label="item da lista"]');
-                            if (!el || el.offsetParent === null) return null;
-                            const r = el.getBoundingClientRect();
-                            return {{x: r.x + r.width / 2, y: r.y + r.height / 2}};
-                        """)
-                    else:
-                        item_divs = await tab.evaluate(f"""
-                            (() => {{
-                                const card = (() => {{ {open_card_js} }})();
-                                if (!card) return 0;
-                                return card.querySelectorAll('div[aria-label="item da lista"]').length;
-                            }})()
-                        """)
-                        item_count = int(item_divs) if isinstance(item_divs, (int, float)) else 0
-                        if idx < item_count:
-                            coords = await _eval_coords(tab, f"""
-                                const card = (() => {{ {open_card_js} }})();
-                                if (!card) return null;
-                                const divs = card.querySelectorAll('div[aria-label="item da lista"]');
-                                const el = divs[{idx}];
-                                if (!el || el.offsetParent === null) return null;
-                                const r = el.getBoundingClientRect();
-                                return {{x: r.x + r.width / 2, y: r.y + r.height / 2}};
-                            """)
-                        else:
-                            coords = await _eval_coords(tab, f"""
-                                const card = (() => {{ {open_card_js} }})();
-                                if (!card) return null;
-                                const btn = card.querySelector('div[role="button"][aria-label="Adicionar item de lista"]')
-                                    || Array.from(card.querySelectorAll('div')).find(d => d.innerText && d.innerText.trim() === 'Item da lista');
-                                if (!btn || btn.offsetParent === null) return null;
-                                const r = btn.getBoundingClientRect();
-                                return {{x: r.x + r.width / 2, y: r.y + r.height / 2}};
-                            """)
-                    if not coords:
-                        if idx == 0:
-                            _output(False, "Campo 'item da lista' não encontrado na nota lista")
-                        break
-                    await _cdp_click(tab, *coords)
-                    await asyncio.sleep(0.4 if (idx > 0 and idx >= item_count) else 0.35)
-                    await tab.evaluate(f"""
-                        (() => {{
-                            const card = (() => {{ {open_card_js} }})();
-                            if (!card) return false;
-                            const divs = card.querySelectorAll('div[aria-label="item da lista"]');
-                            const el = divs.length > {idx} ? divs[{idx}] : (divs.length > 0 ? divs[divs.length - 1] : document.activeElement);
-                            if (!el) return false;
-                            el.focus();
-                            const sel = document.getSelection();
-                            const range = document.createRange();
-                            range.selectNodeContents(el);
-                            sel.removeAllRanges();
-                            sel.addRange(range);
-                            document.execCommand('insertText', false, `{escaped_item}`);
+                while True:
+                    deleted_any = await tab.evaluate("""
+                        (() => {
+                            const btns = document.querySelectorAll('div[role="button"][data-tooltip-text="Excluir"][aria-label="Excluir"]');
+                            if (btns.length === 0) return false;
+                            
+                            // Simular a cadeia completa de eventos do mouse no DOM para forcar os listeners do React (Keep) a apagarem a row
+                            for (const b of btns) {
+                                ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+                                    b.dispatchEvent(new MouseEvent(evt, {bubbles: true, cancelable: true, view: window}));
+                                });
+                            }
                             return true;
-                        }})()
+                        })()
                     """)
-                    await asyncio.sleep(0.25)
-        elif not is_list and args.content:
-            # Mesma estrutura da lista: linhas como array; cada linha = um "slot" (p[role="presentation"] no combobox).
-            # Primeiro slot = limpar combobox e insertText; demais = ENTER se preciso, depois clicar no p e insertText.
-            content_normalized = args.content.replace("\\n", "\n")
-            lines = [s for s in content_normalized.split("\n")]
-            if lines:
-                for idx, line in enumerate(lines):
-                    escaped = line.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${}")
-                    if idx == 0:
-                        coords = await _eval_coords(tab, f"""
-                            const card = (() => {{ {open_card_js} }})();
-                            if (!card) return null;
-                            const box = card.querySelector('div[role="combobox"]');
-                            if (!box || box.offsetParent === null) return null;
-                            const r = box.getBoundingClientRect();
-                            return {{x: r.x + r.width / 2, y: r.y + r.height / 2}};
-                        """)
-                        if not coords:
-                            _output(False, "Corpo da nota (combobox) não encontrado no card")
-                            break
-                        await _cdp_click(tab, *coords)
-                        await asyncio.sleep(0.35)
+                    if not deleted_any:
+                        break # Nenhum item restante
+                    await asyncio.sleep(0.5)
+                        
+                # 2. Encontrar o container de "Adicionar item de lista" para iniciar a adicao
+                add_item_coords = await _eval_coords(tab, """
+                    const c = document.querySelector('div[role="button"][aria-label="Adicionar item de lista"]');
+                    if (c) {
+                        const r = c.getBoundingClientRect();
+                        return {x: r.x + r.width / 2, y: r.y + r.height / 2};
+                    }
+                    return null;
+                """)
+                
+                if add_item_coords:
+                    await _cdp_click(tab, *add_item_coords)
+                    await asyncio.sleep(0.3)
+                    
+                    # 3. Mapear e injetar cada item, dando ENTER entre eles
+                    for i, item in enumerate(items):
+                        escaped_item = item.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
                         await tab.evaluate(f"""
                             (() => {{
-                                const card = (() => {{ {open_card_js} }})();
-                                if (!card) return;
-                                const box = card.querySelector('div[role="combobox"]');
-                                if (!box) return;
-                                box.focus();
-                                const sel = document.getSelection();
-                                const range = document.createRange();
-                                range.selectNodeContents(box);
-                                sel.removeAllRanges();
-                                sel.addRange(range);
-                                document.execCommand('delete', false, null);
+                                document.execCommand('insertText', false, `{escaped_item}`);
                             }})()
                         """)
-                        await asyncio.sleep(0.2)
-                        await tab.evaluate(f"""
-                            (() => {{
-                                const card = (() => {{ {open_card_js} }})();
-                                if (!card) return;
-                                const box = card.querySelector('div[role="combobox"]');
-                                if (!box) return;
-                                box.focus();
-                                const sel = document.getSelection();
-                                const range = document.createRange();
-                                range.selectNodeContents(box);
-                                sel.removeAllRanges();
-                                sel.addRange(range);
-                                document.execCommand('insertText', false, `{escaped}`);
-                            }})()
-                        """)
-                    else:
-                        paras_count = await tab.evaluate(f"""
-                            (() => {{
-                                const card = (() => {{ {open_card_js} }})();
-                                if (!card) return 0;
-                                const box = card.querySelector('div[role="combobox"]');
-                                return box ? box.querySelectorAll('p[role="presentation"]').length : 0;
-                            }})()
-                        """)
-                        paras_count = int(paras_count) if isinstance(paras_count, (int, float)) else 0
-                        if idx >= paras_count:
-                            await tab.evaluate(f"""
-                                (() => {{
-                                    const card = (() => {{ {open_card_js} }})();
-                                    if (!card) return;
-                                    const box = card.querySelector('div[role="combobox"]');
-                                    if (!box) return;
-                                    box.focus();
-                                    const sel = document.getSelection();
-                                    const range = document.createRange();
-                                    range.selectNodeContents(box);
-                                    range.collapse(false);
-                                    sel.removeAllRanges();
-                                    sel.addRange(range);
-                                }})()
-                            """)
-                            await asyncio.sleep(0.1)
+                        if i < len(items) - 1:
                             await _press_enter(tab)
-                            await asyncio.sleep(0.35)
-                        coords = await _eval_coords(tab, f"""
-                            const card = (() => {{ {open_card_js} }})();
-                            if (!card) return null;
-                            const box = card.querySelector('div[role="combobox"]');
-                            if (!box) return null;
-                            const paras = box.querySelectorAll('p[role="presentation"]');
-                            const el = paras.length > {idx} ? paras[{idx}] : paras[paras.length - 1];
-                            if (!el || el.offsetParent === null) return null;
-                            const r = el.getBoundingClientRect();
-                            return {{x: r.x + r.width / 2, y: r.y + r.height / 2}};
-                        """)
-                        if not coords:
-                            break
-                        await _cdp_click(tab, *coords)
-                        await asyncio.sleep(0.3)
-                        await tab.evaluate(f"""
-                            (() => {{
-                                const card = (() => {{ {open_card_js} }})();
-                                if (!card) return;
-                                const box = card.querySelector('div[role="combobox"]');
-                                if (!box) return;
-                                const paras = box.querySelectorAll('p[role="presentation"]');
-                                const el = paras.length > {idx} ? paras[{idx}] : paras[paras.length - 1];
-                                if (!el) return;
-                                el.focus();
-                                const sel = document.getSelection();
-                                const range = document.createRange();
-                                range.selectNodeContents(el);
-                                sel.removeAllRanges();
-                                sel.addRange(range);
-                                document.execCommand('insertText', false, `{escaped}`);
-                            }})()
-                        """)
-                    await asyncio.sleep(0.2)
+                            await asyncio.sleep(0.3)
+                            
+                    await asyncio.sleep(0.3)
+                else:
+                    _output(False, "Campo 'Item da lista' não encontrado no modal aberto")
+                    return
+            
+        elif not is_list and args.content:
+            # 5. Focar no corpo da nota (onde o cursor deveria estar apos o clique na grid)
+            await asyncio.sleep(0.5)
+            await tab.evaluate("""
+                (() => {
+                    let target = document.activeElement;
+                    if (!target || target.getAttribute('role') === 'button' || target.tagName === 'BODY' || target.getAttribute('aria-label') === 'Título' || target.getAttribute('aria-label') === 'Title') {
+                        const editor = document.querySelector('.IZ65Hb-WsjYwc-nUpftc') || document.body;
+                        const editables = [...editor.querySelectorAll('[role="textbox"]:not([aria-label="Título"]):not([aria-label="Title"])')];
+                        if (editables.length > 0) editables[0].focus();
+                    }
+                })()
+            """)
+            await asyncio.sleep(0.3)
+            
+            # Executar o comando Ctrl + A nativo para selecionar todo o texto existente
+            await tab.send(uc.cdp.input_.dispatch_key_event(
+                type_="keyDown", modifiers=2, windows_virtual_key_code=65, code="KeyA", key="a"
+            ))
+            await tab.send(uc.cdp.input_.dispatch_key_event(
+                type_="keyUp", modifiers=2, windows_virtual_key_code=65, code="KeyA", key="a"
+            ))
             await asyncio.sleep(0.2)
+            
+            # Executar Delete nativo
+            await tab.send(uc.cdp.input_.dispatch_key_event(
+                type_="keyDown", windows_virtual_key_code=46, code="Delete", key="Delete"
+            ))
+            await tab.send(uc.cdp.input_.dispatch_key_event(
+                type_="keyUp", windows_virtual_key_code=46, code="Delete", key="Delete"
+            ))
+            await asyncio.sleep(0.3)
+                
+            # 6. Proceder com o preenchimento utilizando o mesmo fluxo da funcao de criacao padrao
+            content_normalized = dados_editados_em_memoria.replace("\\n", "\n")
+            lines = content_normalized.splitlines()
+            
+            for i, line in enumerate(lines):
+                escaped = line.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+                await tab.evaluate(f"""
+                    (() => {{
+                        let target = document.activeElement;
+                        if (!target || target.getAttribute('role') === 'button' || target.tagName === 'BODY') {{
+                            const editor = document.querySelector('.IZ65Hb-WsjYwc-nUpftc') || document.body;
+                            const editables = [...editor.querySelectorAll('[role="textbox"]:not([aria-label="Título"]):not([aria-label="Title"])')];
+                            if (editables.length > 0) target = editables[0];
+                        }}
+                        if (target) {{
+                            target.focus();
+                            document.execCommand('insertText', false, `{escaped}`);
+                        }}
+                    }})()
+                """)
+                if i < len(lines) - 1:
+                    await _press_enter(tab)
+                    await asyncio.sleep(0.3)
+                    
+            await asyncio.sleep(0.3)
 
         await _click_button_in_editor(tab, "Fechar")
         await asyncio.sleep(12) # Aguardar sincronização final com a nuvem
