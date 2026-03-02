@@ -1,166 +1,165 @@
 ---
 name: google-keep
-description: Integração com Google Keep via nodriver (Chrome não detectável). Cria, lê, atualiza e exclui notas.
+description: Integration with Google Keep via nodriver (undetectable Chrome). Creates, reads, updates, and deletes notes.
 version: 0.3.0
 author: Ricardo Reichert
 read_when:
-  - Criar notas no Google Keep
-  - Listar notas do Google Keep
-  - Atualizar notas no Google Keep
-  - Excluir notas do Google Keep
-  - Arquivar notas no Google Keep
-  - Gerenciar notas
+  - Create notes in Google Keep
+  - List notes from Google Keep
+  - Update notes in Google Keep
+  - Delete notes from Google Keep
+  - Archive notes in Google Keep
+  - Manage notes
 ---
 
 # Google Keep Skill
 
-Skill para interagir com o Google Keep via `nodriver` (Chrome real, sem detecção de bot).
+Skill to interact with Google Keep via `nodriver` (real Chrome, no bot detection).
 
-## Instalação
+## Installation
 
-**Pré-requisitos**
+**Prerequisites**
 
 - Python 3.11+
-- [uv](https://docs.astral.sh/uv/) (gerenciador de pacotes e ambiente)
-- Google Chrome instalado no sistema (ex.: `sudo apt install google-chrome-stable` no Linux)
+- [uv](https://docs.astral.sh/uv/) (package and environment manager)
+- Google Chrome installed on the system (e.g., `sudo apt install google-chrome-stable` on Linux)
 
-**Onde a skill fica**
+**Skill Location**
 
-A skill deve estar em `~/.nanobot/workspace/skills/google-keep-skill/` (ou no `workspace/skills` do Nanobot). O Nanobot descobre skills que tenham `SKILL.md` e `_meta.json` nessa árvore.
+The skill must be in `~/.nanobot/workspace/skills/google-keep-skill/` (or in the Nanobot `workspace/skills`). Nanobot discovers skills that have `SKILL.md` and `_meta.json` in this tree.
 
-**Instalar dependências**
+**Install Dependencies**
 
-Na raiz da skill, o `uv` usa o `pyproject.toml`; não é necessário rodar nada além de `uv run` nos comandos abaixo. Na primeira execução o `uv` cria o ambiente e instala as dependências.
+In the skill root, `uv` uses `pyproject.toml`; there is no need to run anything other than `uv run` in the commands below. On the first run, `uv` creates the environment and installs dependencies.
 
 ```bash
 cd ~/.nanobot/workspace/skills/google-keep-skill
-uv run python scripts/keep.py check   # exemplo; na primeira vez o uv instala deps
+uv run python scripts/keep.py check   # example; on first run uv installs deps
 ```
 
-(Opcional: `make check` faz o mesmo se você usar o Makefile.)
+(Optional: `make check` does the same if you use the Makefile.)
 
-## Configuração no Nanobot
+## Configuration in Nanobot
 
-1. **Nada no `config.json` do Nanobot** — não é preciso registrar a skill em arquivo de configuração; ela é usada via comandos `exec` quando o usuário pede ações no Google Keep.
+1. **Nothing in Nanobot's `config.json`** — there is no need to register the skill in a configuration file; it is used via `exec` commands when the user requests actions in Google Keep.
 
-2. **Login uma vez** — antes de o bot poder criar/listar/editar notas, é necessário fazer login manual no Chrome (sessão fica salva). O usuário ou o agente deve executar:
+2. **Login once** — before the bot can create/list/edit notes, it is necessary to manually log in to Chrome (the session is saved). The user or the agent must execute:
    ```bash
    cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py login
    ```
-   O Chrome abre; fazer login na conta Google, fechar o navegador. A sessão é salva em `config/` e reutilizada nas próximas chamadas.
+   Chrome opens; log in to your Google account, close the browser. The session is saved in `config/` and reused in future calls.
 
-3. **Como o bot usa a skill** — o agente chama a ferramenta `exec` com o comando completo, por exemplo:
+3. **How the bot uses the skill** — the agent calls the `exec` tool with the complete command, for example:
    ```bash
    cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py list --limit 5
    ```
-   Ou para criar nota: `... keep.py create --title "Título" --content "Texto"`. A saída é JSON; em caso de sessão expirada, o script retorna `"success": false` e mensagem para o usuário rodar `keep.py login` de novo.
+   Or to create a note: `... keep.py create --title "Title" --content "Text"`. The output is JSON; if the session has expired, the script returns `"success": false` and a message for the user to run `keep.py login` again.
 
-4. **Resumo** — Colocar a skill em `workspace/skills/google-keep-skill`, rodar `keep.py login` uma vez, daí o bot usa sempre `exec` com os comandos descritos na seção **Comandos** abaixo.
+4. **Summary** — Place the skill in `workspace/skills/google-keep-skill`, run `keep.py login` once, then the bot always uses `exec` with the commands described in the **Commands** section below.
 
-## Configuração Inicial (login — uma vez)
+## Initial Setup (login — once)
 
-Este passo é o **login manual** citado em **Configuração no Nanobot** (item 2). Execute uma vez para salvar a sessão.
+This step is the **manual login** cited in **Configuration in Nanobot** (item 2). Execute once to save the session.
 
 ```bash
 cd ~/.nanobot/workspace/skills/google-keep-skill
 uv run python scripts/keep.py login
 ```
 
-O Chrome abrirá com a página do Google Keep. Faça login normalmente. Após detectar o login, o navegador fecha e a sessão é salva.
+Chrome will open with the Google Keep page. Log in normally. After detecting the login, the browser closes and the session is saved.
 
-### Verificar sessão
+### Verify session
 
 ```bash
 cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py check
 ```
 
-### Limpar sessão
+### Clear session
 
 ```bash
 cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py logout
 ```
 
-**Só use `logout` se quiser desvincular a conta.** Após isso será necessário fazer login de novo.
+**Only use `logout` if you want to unlink the account.** After this, you will need to log in again.
 
-## Preservar autenticação (para o bot usar sempre a mesma sessão)
+## Preserving Authentication (for the bot to always use the same session)
 
-A sessão fica guardada em dois lugares e é reutilizada em toda execução:
+The session is stored in two places and is reused in every execution:
 
-| Onde | Caminho | Uso |
-|------|---------|-----|
-| **Perfil Chrome** | `config/chrome-profile/` | Cookies, cache e estado do navegador (persistente). |
-| **Cópia de cookies** | `config/cookies.json` | Backup dos cookies; restaurado em cada sessão headless. |
+| Where | Path | Use |
+|-------|------|-----|
+| **Chrome Profile** | `config/chrome-profile/` | Cookies, cache, and browser state (persistent). |
+| **Cookie Backup** | `config/cookies.json` | Backup of cookies; restored in every headless session. |
 
-**Para não perder a autenticação:**
+**To not lose authentication:**
 
-1. **Não apague** a pasta `config/` nem execute `keep.py logout` a menos que queira deslogar de propósito.
-2. **Backup (opcional):** para guardar a sessão noutro lugar (ex.: antes de reinstalar o sistema), copie a pasta `config/` inteira para um backup. Para restaurar, devolva `config/` ao mesmo caminho dentro da skill.
-3. **Um Chrome por vez:** não abra outro Chrome usando o mesmo `config/chrome-profile` (ex.: dois `keep.py` em paralelo). O Makefile e o script de teste removem `SingletonLock` antes de rodar para evitar travar o perfil.
-4. **Se o Google pedir login de novo** (segurança, troca de senha, etc.), rode de novo `uv run python scripts/keep.py login` e faça o login manual; a nova sessão será salva no mesmo `config/`.
-5. **Arquivos sensíveis:** `config/.gitignore` já contém `.env`, `cookies.json` e `chrome-profile/` — não vão para o repositório.
+1. **Do not delete** the `config/` folder or run `keep.py logout` unless you want to log out on purpose.
+2. **Backup (optional):** to store the session elsewhere (e.g., before reinstalling the system), copy the entire `config/` folder to a backup. To restore, return `config/` to the same path inside the skill.
+3. **One Chrome at a time:** do not open another Chrome using the same `config/chrome-profile` (e.g., two `keep.py` in parallel). The Makefile and the test script remove `SingletonLock` before running to avoid locking the profile.
+4. **If Google asks for login again** (security, password change, etc.), run `uv run python scripts/keep.py login` again and log in manually; the new session will be saved in the same `config/`.
+5. **Sensitive files:** `config/.gitignore` already contains `.env`, `cookies.json`, and `chrome-profile/` — they do not go to the repository.
 
-O bot (Nanobot) usa sempre a mesma sessão enquanto esses arquivos existirem e não forem removidos.
+The bot (Nanobot) always uses the same session as long as these files exist and are not removed.
 
-## Comandos
+## Commands
 
-Todos via `exec`:
+All executed via `exec`:
 
 ```bash
 cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py <comando>
 ```
 
-**Fluxo criar nota normal:** procurar div com texto "Criar uma nota…" e clicar → adicionar texto da nota (conteúdo) → procurar div "Título", clicar e escrever o título → clicar botão Fechar (role=button).
+**ATTENTION AGENT:** You MUST strictly use the parameters below. You can also optionally append `--visible` before the command (e.g., `keep.py --visible create ...`) if visual user verification is required.
 
-**Fluxo criar nota lista:** procurar div com `data-tooltip-text="Nova lista"` e `aria-label="Nova lista"`, clicar → escrever primeiro item → para cada próximo item: pressionar ENTER (ou clicar div "Item da lista") e escrever → preencher título como na nota normal → botão Fechar.
+* `list [--limit N] [--filter "text"]`: Lists notes in `text` (Normal) or `list` (Checklist) format.
+* `read --title "T"`: Returns the structured content of the note and its type. **ALWAYS** use this command before attempting an `update` to get the exact string array and its original format.
+* `create --title "T" --content "C"`: Creates a text note. To break lines, use literally the dynamic text `\n` sent via the terminal.
+* `create-list --title "T" --items "i1, i2, i3"`: Creates a checklist note. Simulates `Enter` between each comma.
+* `update --title "T" [--new-title "NT"] [--content "C"]`: **COMPLETELY REPLACES** the old content with the new.
+  * **If List:** Zeroes all old items by simulating clicks on "Delete" and regenerates the list starting from scratch iterating over `--content "New item 1\nNew item 2"`.
+  * **If Text:** Triggers `Ctrl+A` and deletes the text, then types the new content.
+  * **WARNING (Future Features):** You CANNOT ask the command to edit just 1 checkbox of a `list` note yet. Therefore, you NEED to pull the entire list via `read`, rewrite it internally, and inject it entirely into `--content` separated by spaces/newlines when calling the `update`.
+* `delete --title "T"`: Move to trash.
+* `archive --title "T"`: Archive note.
 
-| Comando | Descrição |
-|---------|-----------|
-| `list [--limit N] [--filter "texto"]` | Listar notas |
-| `create --title "T" --content "C"` | Criar nota (clica em "Criar uma nota…", preenche conteúdo, depois título, Fechar) |
-| `create-list --title "T" --items "i1, i2, i3"` | Criar nota tipo lista (Nova lista → itens → título → Fechar) |
-| `read --title "T"` | Ler nota pelo título |
-| `update --title "T" [--new-title "NT"] [--content "C"]` | Atualizar nota |
-| `delete --title "T"` | Mover para lixeira |
-| `archive --title "T"` | Arquivar nota |
-
-## Exemplos para o Nanobot
+## Examples for Nanobot
 
 ```bash
-# Criar nota
-cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py create --title "Compras" --content "- Leite\n- Pão"
+# 1. Agent creates a multi-line note
+cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py create --title "Groceries" --content "- Milk\n- Bread"
 
-# Criar lista (nota com itens)
-cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py create-list --title "Compras" --items "Leite, Pão, Café"
+# 2. Agent creates a native checklist in list format
+cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py create-list --title "Groceries" --items "Milk, Bread, Coffee"
 
-# Listar com filtro
-cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py list --filter "reunião"
+# 3. Agent scans for items
+cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py list --filter "meeting"
 
-# Atualizar
-cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py update --title "Compras" --content "- Leite\n- Pão\n- Café"
+# 4. Agent updates an entire list completely rewriting it from scratch on the UI
+cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py update --title "Groceries" --content "Milk\nBread\nCoffee\nChocolate"
 ```
 
-## Saída JSON
+## JSON Output
 
 ```json
 {
   "success": true,
-  "message": "Nota criada com sucesso",
-  "data": { "title": "Compras" }
+  "message": "Note successfully created",
+  "data": { "title": "Groceries" }
 }
 ```
 
-## Pipeline / Testes
+## Pipeline / Tests
 
-O teste CRUD completo (criar → listar → ler → editar → listar → deletar → verificar) está incorporado ao projeto.
+The complete CRUD test (create → list → read → edit → list → delete → verify) is embedded in the project.
 
-**Requer sessão ativa** (executar `make login` ou `uv run python scripts/keep.py login` antes).
+**Requires active session** (execute `make login` or `uv run python scripts/keep.py login` beforehand).
 
 ```bash
 cd ~/.nanobot/workspace/skills/google-keep-skill
 make test
 ```
 
-Ou sem Makefile:
+Or without Makefile:
 
 ```bash
 cd ~/.nanobot/workspace/skills/google-keep-skill
@@ -168,10 +167,10 @@ rm -f config/chrome-profile/SingletonLock 2>/dev/null
 uv run python scripts/test_crud.py
 ```
 
-Outros alvos úteis: `make login`, `make check`, `make clean`.
+Other useful targets: `make login`, `make check`, `make clean`.
 
-## Limitações
+## Limitations
 
-- Seletores CSS podem quebrar se o Google alterar a UI
-- Requer login manual uma vez (sessão persistente); ver **Preservar autenticação** acima
-- Se a sessão expirar, orientar o usuário a executar `keep.py login`
+- CSS selectors break if Google changes the UI
+- Requires manual login once (persistent session); see **Preserving Authentication** above
+- If the session expires, instruct the user to run `keep.py login`

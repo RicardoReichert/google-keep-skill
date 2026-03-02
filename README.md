@@ -19,9 +19,15 @@
 
 ## 📢 News
 
-- **2026-02-27** 🎉 Released **v0.3.0** — refactored note and list creation with precise DOM selectors, multi-line content support, and robust CDP click interactions.
-- **2026-02-27** 🔧 Fixed headless viewport sizing to prevent lazy-loading issues.
-- **2026-02-27** ✨ Improved note extraction to handle whitespace-only ghost notes.
+- **2026-03-02** 🎉 Released **v1.0.0** — Completely refactored the Basic CRUD (Create, Read, Update, Delete) and Archive function. The tool now runs with maximum stability using in-memory reads, smart DOM selectors, and native CDP/React interactions.
+
+## 🚀 Future Features
+
+The skill is constantly evolving! Upcoming updates will focus on granular operations:
+- **Granular List Editing:** Modify, delete, or check a single item in an existing list (currently, the update command replaces the entire list).
+- **Partial Update:** Ability to edit only the `title` of a note, preserving the original content in the cloud with 0% risk of formatting loss.
+- **Colors and Labels (Tags):** Full support for changing color palettes and adding metadata to existing notes.
+- **Pinning:** Command to pin/unpin notes to the top.
 
 ## Key Features
 
@@ -74,108 +80,62 @@ The skill follows a **CLI → Browser Automation → DOM Interaction** pattern, 
 
 ## ✨ Commands
 
-All commands are executed via the CLI:
+All commands are executed via the CLI. The backend works unconditionally across Google Keep's dynamic interface.
 
 ```bash
 cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py <command>
 ```
 
-<table align="center" width="100%">
-  <tr>
-    <th width="35%">Command</th>
-    <th width="65%">Description</th>
-  </tr>
-  <tr>
-    <td><code>login</code></td>
-    <td>Opens Chrome for manual Google login (one-time setup).</td>
-  </tr>
-  <tr>
-    <td><code>logout</code></td>
-    <td>Clears saved session data.</td>
-  </tr>
-  <tr>
-    <td><code>check</code></td>
-    <td>Verifies if the saved session is still active.</td>
-  </tr>
-  <tr>
-    <td><code>list [--limit N] [--filter "text"]</code></td>
-    <td>Lists all notes with optional limit and text filter.</td>
-  </tr>
-  <tr>
-    <td><code>create --title "T" --content "C"</code></td>
-    <td>Creates a plain text note with multi-line support (<code>\n</code>).</td>
-  </tr>
-  <tr>
-    <td><code>create-list --title "T" --items "a, b, c"</code></td>
-    <td>Creates a checklist note with comma-separated items.</td>
-  </tr>
-  <tr>
-    <td><code>read --title "T"</code></td>
-    <td>Reads a specific note by its exact title.</td>
-  </tr>
-  <tr>
-    <td><code>update --title "T" [--new-title "NT"] [--content "C"]</code></td>
-    <td>Updates an existing note's title and/or content.</td>
-  </tr>
-  <tr>
-    <td><code>delete --title "T"</code></td>
-    <td>Moves a note to the trash.</td>
-  </tr>
-  <tr>
-    <td><code>archive --title "T"</code></td>
-    <td>Archives a note.</td>
-  </tr>
-</table>
+### 👁️ Global Flags
+* `--visible`: Appended before the command (e.g., `keep.py --visible update ...`). Forces `nodriver` to run the browser in visible mode (headful) instead of secretly executing in the background. Useful for debugging or visually confirming operations.
 
-## 📦 Install
+### 1. System & Session
+* `login`: Opens Chrome for manual Google login (one-time setup). The session is bound to the robot's profile and ignored by Git.
+* `logout`: Clears the currently saved active session data.
+* `check`: Programmatically verifies if the saved session cookie is still valid without heavily interacting with the UI.
 
-```bash
-git clone git@github.com:RicardoReichert/google-keep-skill.git
-cd google-keep-skill
-
-# First run installs dependencies automatically via uv
-uv run python scripts/keep.py check
-```
-
-### Prerequisites
-
-- **Python 3.11+**
-- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager
-- **Google Chrome** installed (`sudo apt install google-chrome-stable` on Ubuntu/Debian)
-
-### Initial Login (one-time)
-
-```bash
-uv run python scripts/keep.py login
-```
-
-Chrome opens → login to your Google account → close the browser. Session is saved persistently.
+### 2. Basic Notes CRUD
+* `list [--limit N] [--filter "text"]`
+  * Passively extracts notes from the DOM grid. Supports case-insensitive text filtering. Returns notes classified as `text` (Normal) or `list` (Task Lists), always retrieving contents as arrays (lines). Automatically ignores Google Keep's "ghost notes".
+* `read --title "T"`
+  * Actively scans the DOM to extract exclusively the note whose title exactly matches `"T"`, returning all its data and type into memory.
+* `create --title "T" --content "C"`
+  * Creates a simple **Normal** text note. Uses CDP interactions and async injection. Accepts the `\n` literal in the `content` parameter to perfectly simulate multiple paragraph line breaks.
+* `create-list --title "T" --items "A, B, C"`
+  * Creates a special **List** type note. The iterative parameter splits commas, typing item by item and simulating organic ENTERs to invoke Google's JavaScript/React chain and build the "checkboxes". Returns success deterministically.
+* `update --title "T" [--new-title "NT"] [--content "C"]`
+  * **The Most Complex Insightful Command.** It supports restructuring both Normal Notes and List Notes, dynamically identifying and handling their details:
+    * **For Normal Text:** Copies the original state, actively clears the canvas (`Ctrl+A` and `Delete` via organic CDP keyboard events so Keep doesn't block it), and re-injects line by line.
+    * **For Lists:** Keep re-renders items with React. The command perfectly simulates `MouseEvent` flows on the exclusion nodes to zero out the list, and then sequentially injects the new `--content` matching the `create-list` logic.
+* `delete --title "T"` and `archive --title "T"`
+  * Extremely precise. Instead of calculating unstable screen coordinates, they open the note in Modal mode, interacting lowly with the floating menu ("More" and "Archive" icons) to vanish the note instantly. Both passively wait for Cloud synchronization.
 
 ## 🔧 Usage Examples
 
 ```bash
-# Create a text note with multi-line content
+# 1. Text Note Creation
 uv run python scripts/keep.py create --title "Meeting Notes" --content "Discuss roadmap\nReview budget\nAssign tasks"
 
-# Create a checklist
+# 2. List Note Creation
 uv run python scripts/keep.py create-list --title "Groceries" --items "Milk, Bread, Coffee, Eggs"
 
-# List all notes
+# 3. Universal Listing
 uv run python scripts/keep.py list
 
-# List with filter
+# 4. Listing With Filters (Returns max 5 tickets containing "meeting")
 uv run python scripts/keep.py list --filter "meeting" --limit 5
 
-# Read a specific note
+# 5. Specific Local Scan
 uv run python scripts/keep.py read --title "Meeting Notes"
 
-# Update a note
-uv run python scripts/keep.py update --title "Meeting Notes" --new-title "Sprint Planning" --content "Updated content"
+# 6. Updating an Entire List (Resetting previous items)
+uv run python scripts/keep.py update --title "Groceries" --content "Milk\nAlmond Milk\nSugar"
 
-# Delete a note
+# 7. Updating the Title of a Text Note
+uv run python scripts/keep.py update --title "Meeting Notes" --new-title "Sprint Planning" --content "Updated content exclusively"
+
+# 8. Clearing the Board (Delete and Archive)
 uv run python scripts/keep.py delete --title "Old Note"
-
-# Archive a note
 uv run python scripts/keep.py archive --title "Completed Task"
 ```
 
