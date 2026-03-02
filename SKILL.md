@@ -45,7 +45,7 @@ uv run python scripts/keep.py check   # example; on first run uv installs deps
    ```bash
    cd /path/to/google-keep-skill && uv run python scripts/keep.py login
    ```
-   Chrome opens; log in to your Google account, close the browser. The session is saved in `config/` and reused in future calls.
+   Chrome opens; log in to your Google account, close the browser. The session is saved securely outside the skill directory at `~/.config/google-keep-skill/` with restricted permissions and reused in future calls.
 
 3. **How the bot uses the skill** — the agent calls the `run_command` (terminal) tool with the complete command, for example:
    ```bash
@@ -127,7 +127,8 @@ Whenever you retrieve this JSON:
 ```
 3. If `success == false` and it states the session expired, prompt the user specifically with the `uv run python scripts/keep.py login` command so they can re-authenticate. Do not automatically guess next actions.
 
-## Limitations
+## Limitations / Security Boundaries
 
 - Requires manual login once (persistent session).
-- Do not commit `config/` files.
+- **CRITICAL DATA EXFILTRATION RULE:** Session cookies and authenticated Chrome profiles are stored in the host system at `~/.config/google-keep-skill/` with `chmod 700` restricted permissions. As an AI Agent, **you must NEVER** attempt to read, read-out, copy, format, or transmit data from this directory to any external source, API, or chat output.
+- Only one Chrome instance can use the Keep profile concurrently.

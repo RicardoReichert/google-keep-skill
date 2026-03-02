@@ -65,7 +65,7 @@ The skill follows a **CLI → Browser Automation → DOM Interaction** pattern, 
   <tr>
     <td><b>🔐 Auth Layer</b></td>
     <td>CDP Cookies / Chrome Profile</td>
-    <td>Persists Google session via profile directory and cookie backup.</td>
+    <td>Persists Google session securely via OS-level `~/.config/google-keep-skill` directory with strict permissions.</td>
   </tr>
   <tr>
     <td><b>🎯 DOM Interaction</b></td>
@@ -157,18 +157,18 @@ uv run python scripts/keep.py archive --title "Completed Task"
   </tr>
   <tr>
     <td><b>Chrome Profile</b></td>
-    <td><code>config/chrome-profile/</code></td>
+    <td><code>~/.config/google-keep-skill/chrome-profile/</code></td>
     <td>Full browser state (cookies, cache, localStorage).</td>
   </tr>
   <tr>
     <td><b>Cookie Backup</b></td>
-    <td><code>config/cookies.json</code></td>
+    <td><code>~/.config/google-keep-skill/cookies.json</code></td>
     <td>CDP cookie backup restored on each headless session.</td>
   </tr>
 </table>
 
 > [!IMPORTANT]
-> These files are excluded from git via `.gitignore`. Never commit session data.
+> These files are stored securely in the user's OS home directory with `0o700`/`0o600` permissions. They are completely decoupled from the skill codebase to prevent data leaks.
 
 ## 🧪 Testing
 

@@ -9,22 +9,20 @@ import asyncio
 import json
 import os
 import shutil
-import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import nodriver as uc
 
-CONFIG_DIR = Path(__file__).parent.parent / "config"
+CONFIG_DIR = Path.home() / ".config" / "google-keep-skill"
 PROFILE_DIR = CONFIG_DIR / "chrome-profile"
 COOKIES_FILE = CONFIG_DIR / "cookies.json"
 KEEP_URL = "https://keep.google.com/"
 
 
 def _find_chrome() -> str:
-    """Localiza o executável do Chrome no sistema."""
+    """Locates the Chrome executable in the system."""
     candidates = [
         "google-chrome",
         "google-chrome-stable",
@@ -35,28 +33,29 @@ def _find_chrome() -> str:
         result = shutil.which(c)
         if result:
             return result
-    raise FileNotFoundError("Google Chrome não encontrado. Instale com: sudo apt install google-chrome-stable")
+    raise FileNotFoundError("Google Chrome not found. Install it with: sudo apt install google-chrome-stable")
 
 
 def interactive_login() -> bool:
-    """Abre Chrome puro (sem automação) para login manual.
+    """Opens pure Chrome (no automation) for manual login.
 
-    O usuário interage normalmente — todos os botões funcionam.
-    Ao fechar o Chrome, o perfil e cookies são salvos automaticamente.
+    The user acts organically.
+    Upon closing Chrome, the profile and cookies are automatically saved to `~/.config/google-keep-skill/`.
     """
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(CONFIG_DIR, 0o700)
     chrome = _find_chrome()
 
     print("=" * 60, flush=True)
-    print("  LOGIN NO GOOGLE KEEP", flush=True)
+    print("  GOOGLE KEEP LOGIN", flush=True)
     print("=" * 60, flush=True)
     print(flush=True)
-    print("Chrome será aberto normalmente (sem automação).", flush=True)
-    print("1. Faça login na sua conta Google", flush=True)
-    print("2. Aguarde o Google Keep carregar", flush=True)
-    print("3. FECHE o navegador (clique no X)", flush=True)
+    print("Chrome will open natively (without automation).", flush=True)
+    print("1. Log in to your Google account", flush=True)
+    print("2. Wait for Google Keep to load", flush=True)
+    print("3. CLOSE the browser (click the X)", flush=True)
     print(flush=True)
-    print("A sessão será salva automaticamente ao fechar.", flush=True)
+    print(f"The session will be saved to {CONFIG_DIR} upon closing.", flush=True)
     print(flush=True)
 
     cmd = [
@@ -71,31 +70,31 @@ def interactive_login() -> bool:
 
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print("Chrome aberto. Aguardando você fechar o navegador...", flush=True)
+        print("Chrome opened. Waiting for you to close the browser...", flush=True)
         proc.wait()
-        print("Chrome fechado.", flush=True)
+        print("Chrome closed.", flush=True)
         print(flush=True)
 
-        # Após fechar, extrair cookies do perfil via nodriver (headless rápido)
-        print("Extraindo cookies da sessão...", flush=True)
+        # After closing, extract cookies from the profile via nodriver (fast headless)
+        print("Extracting session cookies...", flush=True)
         ok = uc.loop().run_until_complete(_extract_and_save_cookies())
         if ok:
-            print("Sessão salva com sucesso!", flush=True)
+            print("Session saved successfully!", flush=True)
         else:
-            print("Aviso: não foi possível verificar a sessão.", flush=True)
-            print("Tente executar 'check' para confirmar.", flush=True)
+            print("Warning: could not verify the session.", flush=True)
+            print("Run the 'check' command to confirm.", flush=True)
         return ok
 
     except FileNotFoundError:
-        print(f"Erro: Chrome não encontrado em {chrome}", flush=True)
+        print(f"Error: Chrome not found at {chrome}", flush=True)
         return False
     except Exception as e:
-        print(f"Erro: {e}", flush=True)
+        print(f"Error: {e}", flush=True)
         return False
 
 
 async def _extract_and_save_cookies() -> bool:
-    """Abre headless com o perfil, navega ao Keep e salva cookies via CDP."""
+    """Opens headless with the profile, navigates to Keep and saves CDP cookies."""
     browser = await _start_nodriver(headless=True)
     tab = browser.main_tab
 
@@ -113,7 +112,7 @@ async def _extract_and_save_cookies() -> bool:
 
 
 async def _start_nodriver(*, headless: bool = True, use_temp_profile: bool = False) -> uc.Browser:
-    """Inicia nodriver. Usa perfil temporário se use_temp_profile=True (dados frescos do servidor)."""
+    """Starts nodriver. Uses a temporary profile if use_temp_profile=True."""
     kwargs = {
         "headless": headless,
         "browser_args": [
@@ -133,7 +132,7 @@ async def _start_nodriver(*, headless: bool = True, use_temp_profile: bool = Fal
 
 
 async def _save_cookies_cdp(tab) -> None:
-    """Salva cookies via CDP em arquivo JSON."""
+    """Saves cookies via CDP to a JSON file."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     cookies = await tab.send(uc.cdp.network.get_all_cookies())
     cookie_list = []
@@ -150,11 +149,11 @@ async def _save_cookies_cdp(tab) -> None:
     with open(COOKIES_FILE, "w") as f:
         json.dump(cookie_list, f)
     COOKIES_FILE.chmod(0o600)
-    print(f"  {len(cookie_list)} cookies salvos.", flush=True)
+    print(f"  {len(cookie_list)} cookies saved.", flush=True)
 
 
 async def _restore_cookies_cdp(tab) -> bool:
-    """Restaura cookies salvos via CDP."""
+    """Restores cookies saved via CDP."""
     if not COOKIES_FILE.exists():
         return False
     try:
@@ -186,7 +185,7 @@ async def _restore_cookies_cdp(tab) -> bool:
 
 
 async def open_keep_session(*, headless: bool = True):
-    """Abre Keep com sessão restaurada (perfil persistente + cookies CDP)."""
+    """Opens Keep with restored session (persistent profile + CDP cookies)."""
     browser = await _start_nodriver(headless=headless)
     tab = browser.main_tab
 
@@ -212,7 +211,7 @@ async def open_keep_session(*, headless: bool = True):
 
 
 async def check_session_async() -> bool:
-    """Verifica se a sessão está ativa."""
+    """Checks if the session is active."""
     browser, tab = await open_keep_session(headless=True)
     if not browser:
         return False
@@ -221,12 +220,12 @@ async def check_session_async() -> bool:
 
 
 def clear_session() -> bool:
-    """Remove perfil e cookies."""
+    """Removes the profile and cookies completely."""
     if PROFILE_DIR.exists():
         shutil.rmtree(PROFILE_DIR, ignore_errors=True)
     if COOKIES_FILE.exists():
         COOKIES_FILE.unlink()
-    print("Sessão removida.", flush=True)
+    print("Session cleared.", flush=True)
     return True
 
 
@@ -238,9 +237,9 @@ if __name__ == "__main__":
         sys.exit(0 if ok else 1)
     elif cmd == "check":
         ok = uc.loop().run_until_complete(check_session_async())
-        print(f"Sessão ativa: {ok}", flush=True)
+        print(f"Session active: {ok}", flush=True)
         sys.exit(0 if ok else 1)
     elif cmd == "clear":
         clear_session()
     else:
-        print("Uso: auth.py [login|check|clear]", flush=True)
+        print("Usage: auth.py [login|check|clear]", flush=True)
