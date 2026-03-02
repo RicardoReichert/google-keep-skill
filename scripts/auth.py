@@ -121,6 +121,8 @@ async def _start_nodriver(*, headless: bool = True, use_temp_profile: bool = Fal
             "--no-default-browser-check",
             "--lang=pt-BR",
             "--window-size=1920,1080",
+            "--disable-session-crashed-bubble",
+            "--disable-infobars",
         ],
     }
     if not use_temp_profile:

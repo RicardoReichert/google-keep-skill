@@ -80,9 +80,9 @@ async def _click_button_in_editor(tab, label: str) -> bool:
 
 
 
-async def _open_keep() -> tuple:
+async def _open_keep(headless: bool = True) -> tuple:
     """Abre o Keep e verifica se está logado. Retorna (browser, tab) ou (None, None)."""
-    browser, tab = await open_keep_session(headless=True)
+    browser, tab = await open_keep_session(headless=headless)
     if not browser:
         _output(False, "Sessão expirada. Execute: uv run python scripts/keep.py login")
         return None, None
@@ -221,7 +221,7 @@ async def _find_and_click_note_by_title_textbox(tab, title: str) -> bool:
 
 async def cmd_list(args) -> None:
     """Lista notas do Google Keep."""
-    browser, tab = await _open_keep()
+    browser, tab = await _open_keep(headless=not getattr(args, 'visible', False))
     if not browser:
         return
 
@@ -249,7 +249,7 @@ async def cmd_list(args) -> None:
 
 async def cmd_create(args) -> None:
     """Cria uma nota de texto simples (seguindo o fluxo preciso)."""
-    browser, tab = await _open_keep()
+    browser, tab = await _open_keep(headless=not getattr(args, 'visible', False))
     if not browser:
         return
 
@@ -324,7 +324,7 @@ async def cmd_create(args) -> None:
                 if (closeBtn) closeBtn.click();
             })();
         ''')
-        await asyncio.sleep(2)
+        await asyncio.sleep(12) # Aguardar sincronização final com a nuvem
 
         _output(True, "Nota criada com sucesso", {"title": args.title})
     except Exception as e:
@@ -335,7 +335,7 @@ async def cmd_create(args) -> None:
 
 async def cmd_create_list(args) -> None:
     """Cria uma nota tipo lista."""
-    browser, tab = await _open_keep()
+    browser, tab = await _open_keep(headless=not getattr(args, 'visible', False))
     if not browser:
         return
 
@@ -347,31 +347,28 @@ async def cmd_create_list(args) -> None:
         return
 
     try:
-        await _wait_notes(tab)
-
-        # 1. Abrir editor de lista
-        # Tentar localizar o botão de nova lista (ícone de checkbox)
-        coords = await _get_element_center(tab, '''
-            const btn = document.querySelector('[data-tooltip-text="Nova lista"]') || 
-                        document.querySelector('[aria-label="Nova lista"]');
+        # 1. Abrir editor de lista clicando no botão 'Nova lista'
+        coords = await _eval_coords(tab, '''
+            const btn = document.querySelector('div[role="button"][data-tooltip-text="Nova lista"][aria-label="Nova lista"]');
             if (!btn || btn.offsetParent === null) return null;
             const r = btn.getBoundingClientRect();
             return {x: r.x + r.width / 2, y: r.y + r.height / 2};
         ''')
+        
         if not coords:
-            # Fallback: tentar clicar na área geral se o botão não for achado
+            # Fallback
             await tab.evaluate('document.querySelector(\'div[role="combobox"]\')?.click()')
             await asyncio.sleep(1)
-            # Tentar converter nota em lista (clicando no menu se necessário, mas melhor abrir direto)
             _output(False, "Botão 'Nova lista' não encontrado visualmente")
             return
-        
+            
         await _cdp_click(tab, *coords)
         if not await _wait_for_element(tab, 'div.IZ65Hb-WsjYwc-nUpftc [contenteditable="true"]', timeout=5):
             _output(False, "Editor de lista não abriu após o clique")
             return
 
         # 2. Preencher itens
+        # O Google Keep foca automaticamente no primeiro item da lista ao usar o atalho
         for i, item in enumerate(items):
             escaped = item.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
             if i > 0:
@@ -380,42 +377,45 @@ async def cmd_create_list(args) -> None:
 
             await tab.evaluate(f"""
                 (() => {{
-                    const editor = document.querySelector('div.IZ65Hb-WsjYwc-nUpftc') || document.body;
-                    const editables = [...editor.querySelectorAll('[contenteditable="true"]:not([role="textbox"])')];
-                    // The active new item is usually the one with the empty placeholder or the last one focused
-                    // We can just find the active focus, or the last empty contenteditable
-                    let target = document.activeElement;
-                    if (!target || target.getAttribute('role') === 'textbox' || !editables.includes(target)) {{
-                       target = editables[editables.length - 1]; 
+                    // Escreve diretamente no elemento atualmente focado pelo Keep
+                    const target = document.activeElement;
+                    if (target && target.getAttribute('contenteditable') === 'true') {{
+                        document.execCommand('insertText', false, `{escaped}`);
                     }}
-                    if (!target) return false;
-                    target.focus();
-                    document.execCommand('insertText', false, `{escaped}`);
-                    return true;
                 }})()
             """)
+            await asyncio.sleep(0.2)
 
         # 3. Preencher Título
         if args.title:
             escaped_title = args.title.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
-            await tab.evaluate(f"""
-                (() => {{
-                    const editor = document.querySelector('div.IZ65Hb-WsjYwc-nUpftc') || document.body;
-                    const titleEl = editor.querySelector('div[role="textbox"][aria-label="Título"]') || 
-                                    editor.querySelector('div[role="textbox"][aria-label="Title"]') ||
-                                    editor.querySelector('div[role="textbox"]');
-                    if (!titleEl) return false;
-                    titleEl.focus();
-                    document.execCommand('insertText', false, `{escaped_title}`);
-                    return true;
-                }})()
+            # Encontrar e clicar na div que contém o texto "Título" (o placeholder)
+            coords = await _eval_coords(tab, """
+                const divs = document.querySelectorAll('div');
+                for (const d of divs) {
+                    if (d.innerText && (d.innerText.trim() === 'Título' || d.innerText.trim() === 'Title') && d.children.length === 0) {
+                        const r = d.getBoundingClientRect();
+                        return {x: r.x + r.width / 2, y: r.y + r.height / 2};
+                    }
+                }
+                return null;
             """)
-            await asyncio.sleep(0.3)
+            if coords:
+                await _cdp_click(tab, *coords)
+                await asyncio.sleep(0.5)
+                # O cursor agora está ativo no campo de título, podemos inserir o texto
+                await tab.evaluate(f"""
+                    (() => {{
+                        document.execCommand('insertText', false, `{escaped_title}`);
+                    }})()
+                """)
+            else:
+                _output(False, "Não foi possível encontrar o campo de Título")
 
         # 4. Fechar
         await tab.save_screenshot("debug_create_list.png")
         await _click_button_in_editor(tab, "Fechar")
-        await asyncio.sleep(2)
+        await asyncio.sleep(12) # Aguardar sincronização final com a nuvem
 
         _output(True, "Lista criada com sucesso", {"title": args.title})
     except Exception as e:
@@ -426,18 +426,69 @@ async def cmd_create_list(args) -> None:
 
 async def cmd_read(args) -> None:
     """Lê uma nota pelo título."""
-    browser, tab = await _open_keep()
+    browser, tab = await _open_keep(headless=not getattr(args, 'visible', False))
     if not browser:
         return
 
     try:
         await _wait_notes(tab)
-        all_notes = await _extract_all_notes(tab)
-        found = next((n for n in all_notes if n["title"] == args.title), None)
-        if found:
-            _output(True, "Nota encontrada", found)
+        target_js = json.dumps(args.title)
+        
+        note_data = await tab.evaluate(f"""
+            (() => {{
+                const target = {target_js};
+                const cards = document.querySelectorAll('div.IZ65Hb-n0tgWb');
+                for (const el of cards) {{
+                    const titleEl = el.querySelector('div[role="textbox"][dir="ltr"]') || el.querySelector('div[role="textbox"]');
+                    if (titleEl && titleEl.innerText && titleEl.innerText.trim() === target) {{
+                        const title = titleEl.innerText.trim();
+                        const hasCheckboxes = el.querySelector('div[role="checkbox"]') !== null;
+                        let content;
+                        
+                        if (hasCheckboxes) {{
+                            const items = [];
+                            el.querySelectorAll('div[role="checkbox"]').forEach(cb => {{
+                                let row = cb.parentElement;
+                                while (row && row !== el) {{
+                                    const paras = row.querySelectorAll('p[role="presentation"]');
+                                    if (paras.length === 1 && row.contains(cb)) {{
+                                        const span = paras[0].querySelector('span');
+                                        const text = (span ? span.innerText : paras[0].innerText).trim();
+                                        if (text) items.push(text);
+                                        break;
+                                    }}
+                                    row = row.parentElement;
+                                }}
+                            }});
+                            content = items;
+                        }} else {{
+                            const paras = el.querySelectorAll('p[role="presentation"]');
+                            const lines = [];
+                            paras.forEach(p => {{
+                                const span = p.querySelector('span');
+                                const line = (span ? span.innerText : p.innerText).trim();
+                                if (line) lines.push(line);
+                            }});
+                            content = lines;
+                        }}
+                        
+                        return JSON.stringify({{
+                            title: title,
+                            content: content,
+                            type: hasCheckboxes ? 'list' : 'text'
+                        }});
+                    }}
+                }}
+                return null;
+            }})()
+        """)
+        
+        if note_data:
+            _output(True, "Nota encontrada", json.loads(note_data))
         else:
             _output(False, f"Nota '{args.title}' não encontrada")
+    except Exception as e:
+        _output(False, f"Erro ao ler nota: {e}")
     finally:
         browser.stop()
 
@@ -451,7 +502,7 @@ async def cmd_update(args) -> None:
     - Nota lista: itens em div[aria-label="item da lista"]; --items "A,B,C" ou --content;
       primeiro item no primeiro div, demais no próximo existente ou em novo (clique "Item da lista").
     """
-    browser, tab = await _open_keep()
+    browser, tab = await _open_keep(headless=not getattr(args, 'visible', False))
     if not browser:
         return
 
@@ -688,7 +739,7 @@ async def cmd_update(args) -> None:
             await asyncio.sleep(0.2)
 
         await _click_button_in_editor(tab, "Fechar")
-        await asyncio.sleep(2)
+        await asyncio.sleep(12) # Aguardar sincronização final com a nuvem
 
         _output(True, "Nota atualizada com sucesso")
     except Exception as e:
@@ -736,8 +787,20 @@ async def _press_enter(tab) -> None:
 
 
 async def cmd_delete(args) -> None:
-    """Move nota para lixeira via menu do card (sem abrir a nota)."""
-    browser, tab = await _open_keep()
+    """Abre a nota e move para lixeira.
+
+    Fluxo:
+      1. Localizar o card da nota pelo título e clicar (CDP) para abrir.
+      2. Encontrar div[role='button'][data-tooltip-text='Mais'][aria-label='Mais'] e clicar.
+      3. Encontrar div com texto 'Excluir nota' e clicar.
+    """
+    browser, tab = await _open_keep(headless=not getattr(args, 'visible', False))
+    if not browser:
+        return
+
+async def cmd_delete(args) -> None:
+    """Abre a nota e move para lixeira (seguindo o fluxo preciso de clique no título)."""
+    browser, tab = await _open_keep(headless=not getattr(args, 'visible', False))
     if not browser:
         return
 
@@ -745,75 +808,61 @@ async def cmd_delete(args) -> None:
         await _wait_notes(tab)
         target_js = json.dumps(args.title)
 
-        # 1. Hover no card: localizar por div[role=textbox] com texto = título (mesma lógica da listagem)
-        note_c = await _eval_coords(tab, f"""
-            const target = {target_js};
-            const cards = document.querySelectorAll('div.IZ65Hb-n0tgWb');
-            for (const el of cards) {{
-                const titleEl = el.querySelector('div[role="textbox"][dir="ltr"]') || el.querySelector('div[role="textbox"]');
-                if (titleEl && titleEl.innerText.trim() === target) {{
-                    const r = el.getBoundingClientRect();
-                    return {{x: r.x + r.width / 2, y: r.y + r.height / 2}};
+        # 1. Localizar o título da nota e clicar
+        is_opened = await tab.evaluate(f"""
+            (() => {{
+                const target = {target_js};
+                const cards = document.querySelectorAll('div.IZ65Hb-n0tgWb');
+                for (const el of cards) {{
+                    const titleEl = el.querySelector('div[role="textbox"][dir="ltr"]') || el.querySelector('div[role="textbox"]');
+                    if (titleEl && titleEl.innerText && titleEl.innerText.trim() === target) {{
+                        titleEl.click();
+                        return true;
+                    }}
                 }}
-            }}
-            return null;
+                return false;
+            }})()
         """)
-        if not note_c:
-            _output(False, f"Nota '{args.title}' não encontrada")
+        if not is_opened:
+            _output(False, f"Nota '{args.title}' não encontrada para exclusão")
             return
 
-        await tab.send(uc.cdp.input_.dispatch_mouse_event(
-            type_="mouseMoved", x=note_c[0], y=note_c[1],
-            button=uc.cdp.input_.MouseButton("none")))
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(2)
 
-        # 2. Clicar "Mais" no card (mesmo card encontrado pelo título)
-        mais_c = await _eval_coords(tab, f"""
-            const target = {target_js};
-            const cards = document.querySelectorAll('div.IZ65Hb-n0tgWb');
-            for (const el of cards) {{
-                const titleEl = el.querySelector('div[role="textbox"][dir="ltr"]') || el.querySelector('div[role="textbox"]');
-                if (titleEl && titleEl.innerText.trim() === target) {{
-                    const btn = el.querySelector('[role="button"][data-tooltip-text="Mais"]');
-                    if (btn) {{
-                        const r = btn.getBoundingClientRect();
-                        return {{x: r.x + r.width / 2, y: r.y + r.height / 2}};
-                    }}
-                    break;
-                }}
-            }}
+        # 2. Procurar div com role="button", data-tooltip-text="Mais" e aria-label="Mais" e clicar via CDP
+        mais_c = await _eval_coords(tab, """
+            const btns = Array.from(document.querySelectorAll('div[role="button"][data-tooltip-text="Mais"][aria-label="Mais"]'));
+            const btn = btns.pop();
+            if (btn) {
+                const r = btn.getBoundingClientRect();
+                return {x: r.x + r.width / 2, y: r.y + r.height / 2};
+            }
             return null;
         """)
         if not mais_c:
-            _output(False, "Botão 'Mais' não encontrado no card")
+            _output(False, "Botão 'Mais' não encontrado")
             return
 
         await _cdp_click(tab, *mais_c)
-        await asyncio.sleep(1)
+        await asyncio.sleep(1.5)
 
-        # 3. Clicar "Excluir nota"
+        # 3. Procurar div com texto "Excluir nota" e clicar via CDP
         excl_c = await _eval_coords(tab, """
-            const divs = document.querySelectorAll('div');
-            for (const d of divs) {
-                if (d.children.length > 0) continue;
-                if (d.offsetParent === null) continue;
-                if (d.innerText?.trim() === 'Excluir nota') {
-                    const r = d.getBoundingClientRect();
-                    return {x: r.x + r.width / 2, y: r.y + r.height / 2};
-                }
+            const divs = Array.from(document.querySelectorAll('div'));
+            const btn = divs.reverse().find(d => d.innerText && d.innerText.trim() === 'Excluir nota' && d.offsetWidth > 0);
+            if (btn) {
+                const r = btn.getBoundingClientRect();
+                return {x: r.x + r.width / 2, y: r.y + r.height / 2};
             }
             return null;
         """)
         if not excl_c:
-            _output(False, "Opção 'Excluir nota' não encontrada")
+            _output(False, "Opção 'Excluir nota' não encontrada no menu")
             return
 
-        await _cdp_click(tab, *excl_c)
-        await asyncio.sleep(3)
-        await tab.save_screenshot("/dev/null")
-        await tab.evaluate("document.querySelectorAll('div').length")
-        await asyncio.sleep(8)
+        await _cdp_click(tab, *excl_c)        
 
+        await asyncio.sleep(12) # Aguardar sincronização final com a nuvem
         _output(True, "Nota movida para lixeira")
     except Exception as e:
         _output(False, f"Erro ao excluir: {e}")
@@ -822,8 +871,13 @@ async def cmd_delete(args) -> None:
 
 
 async def cmd_archive(args) -> None:
-    """Arquiva uma nota via botão do card (sem abrir a nota)."""
-    browser, tab = await _open_keep()
+    """Arquiva uma nota abrindo-a primeiro.
+    
+    Fluxo:
+      1. Localizar a nota pelo título e clicar nela.
+      2. Encontrar div[role='button'][data-tooltip-text='Arquivar'][aria-label='Arquivar'] e clicar.
+    """
+    browser, tab = await _open_keep(headless=not getattr(args, 'visible', False))
     if not browser:
         return
 
@@ -831,54 +885,57 @@ async def cmd_archive(args) -> None:
         await _wait_notes(tab)
         target_js = json.dumps(args.title)
 
-        # 1. Hover no card: localizar por div[role=textbox] com texto = título (mesma lógica da listagem)
-        note_c = await _eval_coords(tab, f"""
-            const target = {target_js};
-            const cards = document.querySelectorAll('div.IZ65Hb-n0tgWb');
-            for (const el of cards) {{
-                const titleEl = el.querySelector('div[role="textbox"][dir="ltr"]') || el.querySelector('div[role="textbox"]');
-                if (titleEl && titleEl.innerText.trim() === target) {{
-                    const r = el.getBoundingClientRect();
-                    return {{x: r.x + r.width / 2, y: r.y + r.height / 2}};
+        # 1. Localizar o título da nota e clicar
+        is_opened = await tab.evaluate(f"""
+            (() => {{
+                const target = {target_js};
+                const cards = document.querySelectorAll('div.IZ65Hb-n0tgWb');
+                for (const el of cards) {{
+                    const titleEl = el.querySelector('div[role="textbox"][dir="ltr"]') || el.querySelector('div[role="textbox"]');
+                    if (titleEl && titleEl.innerText && titleEl.innerText.trim() === target) {{
+                        titleEl.click();
+                        return true;
+                    }}
                 }}
-            }}
-            return null;
+                return false;
+            }})()
         """)
-        if not note_c:
-            _output(False, f"Nota '{args.title}' não encontrada")
+        if not is_opened:
+            _output(False, f"Nota '{args.title}' não encontrada para arquivamento")
             return
 
-        await tab.send(uc.cdp.input_.dispatch_mouse_event(
-            type_="mouseMoved", x=note_c[0], y=note_c[1],
-            button=uc.cdp.input_.MouseButton("none")))
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(2)
 
-        # 2. Clicar "Arquivar" no card (mesmo card encontrado pelo título)
-        arch_c = await _eval_coords(tab, f"""
-            const target = {target_js};
-            const cards = document.querySelectorAll('div.IZ65Hb-n0tgWb');
-            for (const el of cards) {{
-                const titleEl = el.querySelector('div[role="textbox"][dir="ltr"]') || el.querySelector('div[role="textbox"]');
-                if (titleEl && titleEl.innerText.trim() === target) {{
-                    const btn = el.querySelector('[role="button"][data-tooltip-text="Arquivar"]');
-                    if (btn) {{
-                        const r = btn.getBoundingClientRect();
-                        return {{x: r.x + r.width / 2, y: r.y + r.height / 2}};
-                    }}
-                    break;
-                }}
-            }}
+        # 2. Procurar div com role="button", data-tooltip-text="Arquivar" e aria-label="Arquivar" e clicar via CDP
+        arch_c = await _eval_coords(tab, """
+            const btns = Array.from(document.querySelectorAll('div[role="button"][data-tooltip-text="Arquivar"][aria-label="Arquivar"]'));
+            const btn = btns.pop();
+            if (btn) {
+                const r = btn.getBoundingClientRect();
+                return {x: r.x + r.width / 2, y: r.y + r.height / 2};
+            }
             return null;
         """)
         if not arch_c:
-            _output(False, "Botão 'Arquivar' não encontrado no card")
+            _output(False, "Botão 'Arquivar' não encontrado")
             return
 
         await _cdp_click(tab, *arch_c)
-        await asyncio.sleep(3)
-        await tab.evaluate("document.querySelectorAll('div').length")
-        await asyncio.sleep(8)
+        await asyncio.sleep(2)
 
+        # 3. Clicar no botão Atualizar para forçar a sincronização
+        update_c = await _eval_coords(tab, """
+            const btn = document.querySelector('div[role="button"][data-tooltip-text="Atualizar"][aria-label="Atualizar"]');
+            if (btn) {
+                const r = btn.getBoundingClientRect();
+                return {x: r.x + r.width / 2, y: r.y + r.height / 2};
+            }
+            return null;
+        """)
+        if update_c:
+            await _cdp_click(tab, *update_c)
+
+        await asyncio.sleep(12) # Aguardar sincronização final com a nuvem
         _output(True, "Nota arquivada com sucesso")
     except Exception as e:
         _output(False, f"Erro ao arquivar: {e}")
@@ -893,6 +950,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Google Keep Manager — nodriver (undetected Chrome)"
     )
+    parser.add_argument("--visible", action="store_true", help="Mostra o navegador (headful)")
     sub = parser.add_subparsers(dest="command", help="Comando a executar")
 
     sub.add_parser("login", help="Abrir Chrome para login manual")
