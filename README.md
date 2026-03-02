@@ -7,19 +7,20 @@
     <img src="https://img.shields.io/badge/nodriver-Chrome_Automation-orange.svg" alt="nodriver">
     <img src="https://img.shields.io/badge/Google_Keep-Integration-4285F4.svg?logo=google&logoColor=white" alt="Google Keep">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-    <img src="https://img.shields.io/badge/version-0.3.0-blueviolet" alt="Version">
+    <img src="https://img.shields.io/badge/version-1.0.0-blueviolet" alt="Version">
   </p>
 </div>
 
 🗒️ **Google Keep Skill** is a **CLI automation tool** that interacts with Google Keep through an undetected headless Chrome browser powered by `nodriver`.
 
 ⚡️ Create, read, update, delete, and archive notes — all from the command line with **structured JSON output**.
+This acts as a solid primitive for LLM Agents and MCP (Model Context Protocol) Servers, providing bulletproof automation over Google Keep.
 
-🔒 Bot-proof: uses a real Chrome instance with persistent session, bypassing Google's bot detection entirely.
+🔒 Bot-proof: uses a real Chrome instance with a persistent session, bypassing Google's bot detection entirely.
 
 ## 📢 News
 
-- **2026-03-02** 🎉 Released **v1.0.0** — Completely refactored the Basic CRUD (Create, Read, Update, Delete) and Archive function. The tool now runs with maximum stability using in-memory reads, smart DOM selectors, and native CDP/React interactions.
+- **2026-03-02** 🎉 Released **v1.0.0** — Completely refactored the Basic CRUD (Create, Read, Update, Delete) and Archive functions. The tool now runs with maximum stability using in-memory reads, smart DOM selectors, native CDP/React interactions, and strict JS injection security.
 
 ## 🚀 Future Features
 
@@ -37,7 +38,7 @@ The skill is constantly evolving! Upcoming updates will focus on granular operat
 
 🔐 **Persistent Session**: Login once manually; the session is saved and reused across all headless executions.
 
-📄 **Structured JSON Output**: Every command returns clean, parseable JSON for easy integration with bots and automation pipelines.
+📄 **Structured JSON Output**: Every command returns clean, parseable JSON. Ideal for LLM Agents to parse and format into beautiful Markdown.
 
 🖥️ **Headless by Default**: Runs without a visible browser window — perfect for server-side automation and CI/CD.
 
@@ -69,12 +70,12 @@ The skill follows a **CLI → Browser Automation → DOM Interaction** pattern, 
   <tr>
     <td><b>🎯 DOM Interaction</b></td>
     <td>JavaScript / CDP Input</td>
-    <td>Finds elements by aria-label and text content, types via execCommand and CDP key events.</td>
+    <td>Finds elements by aria-label and text content, injects values securely avoiding XSS payloads.</td>
   </tr>
   <tr>
     <td><b>📤 Output</b></td>
     <td>JSON (stdout)</td>
-    <td>Returns structured success/error responses for automation consumers.</td>
+    <td>Returns structured success/error responses for automation consumers to render.</td>
   </tr>
 </table>
 
@@ -86,7 +87,7 @@ All commands are executed via the CLI. The backend works unconditionally across 
 cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.py <command>
 ```
 
-### 👁️ Global Flags
+### ��️ Global Flags
 * `--visible`: Appended before the command (e.g., `keep.py --visible update ...`). Forces `nodriver` to run the browser in visible mode (headful) instead of secretly executing in the background. Useful for debugging or visually confirming operations.
 
 ### 1. System & Session
@@ -100,15 +101,22 @@ cd ~/.nanobot/workspace/skills/google-keep-skill && uv run python scripts/keep.p
 * `read --title "T"`
   * Actively scans the DOM to extract exclusively the note whose title exactly matches `"T"`, returning all its data and type into memory.
 * `create --title "T" --content "C"`
-  * Creates a simple **Normal** text note. Uses CDP interactions and async injection. Accepts the `\n` literal in the `content` parameter to perfectly simulate multiple paragraph line breaks.
+  * Creates a simple **text** note. Uses CDP interactions and async injection. Accepts the `\n` literal in the `content` parameter to elegantly simulate paragraph line breaks.
 * `create-list --title "T" --items "A, B, C"`
-  * Creates a special **List** type note. The iterative parameter splits commas, typing item by item and simulating organic ENTERs to invoke Google's JavaScript/React chain and build the "checkboxes". Returns success deterministically.
+  * Creates a special **list** type note. The iterative parameter splits commas, typing item by item and simulating organic ENTERs to invoke Google's JavaScript/React chain and build the "checkboxes".
 * `update --title "T" [--new-title "NT"] [--content "C"]`
-  * **The Most Complex Insightful Command.** It supports restructuring both Normal Notes and List Notes, dynamically identifying and handling their details:
-    * **For Normal Text:** Copies the original state, actively clears the canvas (`Ctrl+A` and `Delete` via organic CDP keyboard events so Keep doesn't block it), and re-injects line by line.
-    * **For Lists:** Keep re-renders items with React. The command perfectly simulates `MouseEvent` flows on the exclusion nodes to zero out the list, and then sequentially injects the new `--content` matching the `create-list` logic.
-* `delete --title "T"` and `archive --title "T"`
-  * Extremely precise. Instead of calculating unstable screen coordinates, they open the note in Modal mode, interacting lowly with the floating menu ("More" and "Archive" icons) to vanish the note instantly. Both passively wait for Cloud synchronization.
+  * **The Most Complex Command.** Restructures both Normal and List Notes dynamically:
+    * **Normal Text:** Copies original state, actively clears canvas (`Ctrl+A` and `Delete` via organic keyboard events), and re-injects line by line.
+    * **Lists:** Simulates `MouseEvent` flows on the exclusion nodes to zero out the list, and then sequentially injects the new `--content` simulating `create-list` logic.
+* `delete --title "T"` / `archive --title "T"`
+  * Extremely precise. They open the note in modal mode and interact lowly with the floating menu to delete/archive it instantly without relying on unstable screen coordinates grids.
+
+## 🔗 Agent / MCP Usage
+
+When an LLM Agent or MCP server wraps this skill:
+1. **Always format the output.** Do not vomit the raw JSON to the user. Extract `data.notes` and format lists as Markdown checklists (`- [ ] Item`) or Markdown unordered lists.
+2. **Handle session drops gracefully.** If `success: false` and the message mentions "Session expired", clearly inform the user to run the `login` command in the terminal.
+3. **Always read before updating.** If required to append or edit an existing note, the agent MUST call `read` first, rebuild the state in its context, and push the complete rewritten string into `update`.
 
 ## 🔧 Usage Examples
 
@@ -139,41 +147,6 @@ uv run python scripts/keep.py delete --title "Old Note"
 uv run python scripts/keep.py archive --title "Completed Task"
 ```
 
-## 📤 JSON Output
-
-Every command returns structured JSON:
-
-```json
-{
-  "success": true,
-  "message": "Note successfully created",
-  "data": { "title": "Groceries" }
-}
-```
-
-```json
-{
-  "success": true,
-  "message": "8 note(s) found",
-  "data": {
-    "notes": [
-      {
-        "id": "1",
-        "title": "Meeting Notes",
-        "content": ["Discuss roadmap", "Review budget", "Assign tasks"],
-        "type": "text"
-      },
-      {
-        "id": "2",
-        "title": "Groceries",
-        "content": ["Milk", "Bread", "Coffee"],
-        "type": "list"
-      }
-    ]
-  }
-}
-```
-
 ## 🔐 Session Persistence
 
 <table align="center" width="100%">
@@ -200,16 +173,8 @@ Every command returns structured JSON:
 ## 🧪 Testing
 
 ```bash
-# Run the minimal test suite (requires active session)
-uv run python scripts/test_list.py
-```
-
-Or via Makefile:
-
-```bash
-make test
-make check
-make login
+# Run the End-to-End test suite (requires active session)
+uv run python scripts/test_crud.py
 ```
 
 ## ⚠️ Limitations
@@ -217,28 +182,6 @@ make login
 - CSS selectors may break if Google updates the Keep UI
 - Requires one-time manual login (session is persistent afterward)
 - Only one Chrome instance can use the profile at a time
-- If Google requires re-authentication, run `keep.py login` again
-
-## 📁 Project Structure
-
-```
-google-keep-skill/
-├── .gitignore
-├── Makefile
-├── SKILL.md              # Nanobot skill documentation
-├── _meta.json             # Skill metadata
-├── pyproject.toml         # Python dependencies (nodriver)
-├── uv.lock                # Locked dependencies
-├── config/
-│   ├── .gitignore         # Excludes sensitive session files
-│   ├── chrome-profile/    # Persistent Chrome profile (gitignored)
-│   └── cookies.json       # Cookie backup (gitignored)
-└── scripts/
-    ├── __init__.py
-    ├── auth.py            # Session management (login, logout, check)
-    ├── keep.py            # Main CLI — all CRUD operations
-    └── test_list.py       # Minimal test suite
-```
 
 ## 👤 Author
 
