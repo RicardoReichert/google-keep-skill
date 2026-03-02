@@ -146,7 +146,7 @@ Every command returns structured JSON:
 ```json
 {
   "success": true,
-  "message": "Nota criada com sucesso",
+  "message": "Note successfully created",
   "data": { "title": "Groceries" }
 }
 ```
@@ -154,7 +154,7 @@ Every command returns structured JSON:
 ```json
 {
   "success": true,
-  "message": "8 nota(s) encontrada(s)",
+  "message": "8 note(s) found",
   "data": {
     "notes": [
       {
